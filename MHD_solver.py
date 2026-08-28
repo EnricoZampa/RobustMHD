@@ -215,6 +215,8 @@ elif ictype == 5:
 
     periodic_x = True
     periodic_y = True
+
+    curlBfun = CF(0)
 elif ictype == 6:
     icname = "MHDvortex"
     # MHD vortex
@@ -362,6 +364,21 @@ else:
 
     mesh = Mesh(geo.GenerateMesh(maxh=hmax))
 
+fes = H1(mesh, order = 1) # auxiliary fes space
+# create integration points for fast evaluation
+eps = 1e-4
+ir =  IntegrationRule(points=[(0+eps,0+eps),(0+eps,1-2*eps), (1-2*eps,0+eps), (0.5,0+eps), (0.5-eps, 0.5- eps), (0+eps,0.5)], weights=[1/6,1/6,1/6,1/6,1/6,1/6])      
+xpts = []
+ypts = []
+zpts = []
+for e in fes.Elements():
+            trafo = e.GetTrafo()
+            for p in ir :
+               xpts.append(trafo(p).point[0])
+               ypts.append(trafo(p).point[1])
+               zpts.append(0)
+mips = mesh(xpts, ypts, zpts)
+npts = 6
 
 C_S= 0.1 # 
 
@@ -660,6 +677,7 @@ err_vec = gf_star.vec.CreateVector()
 errL2 = []
 errCurl = []
 errStab = []
+errLinf = []
 
 while t < tend - 1e-8:
 
@@ -705,11 +723,16 @@ while t < tend - 1e-8:
     print("Curl B = " + str( sqrt(Integrate(Norm(curl(gfB))**2, mesh))))
 
     time.Set(t) # to compute the error
-    if ictype == 1 or ictype == 6 or ictype == 7:
+    if ictype == 1 or ictype == 5 or ictype == 6 or ictype == 7:
         # compute errors
-        errL2.append( Integrate(Norm(gfu-ufun)**2, mesh) + Integrate(Norm(gfB - Bfun)**2, mesh) )
+        if ictype == 5:
+            # special case: for the Loop advection we measure only the L2 error for B
+            errL2.append( Integrate(Norm(gfB - B0)**2, mesh) )
+            errLinf.append( np.max(np.array(Norm(gfB-B0)(mips))))
+        else:
+            errL2.append( Integrate(Norm(gfu-ufun)**2, mesh) + Integrate(Norm(gfB - Bfun)**2, mesh) )
         vec_aux[:] = 0
-        if ictype == 7:
+        if ictype == 5 or ictype == 7:
             gfu_ex.vec.data = gfu0.vec
             gfB_ex.vec.data = gfB0.vec
         else:
@@ -733,7 +756,7 @@ while t < tend - 1e-8:
 
 time.Set(tend)
 
-if ictype == 1 or ictype == 6 or ictype == 7:
+if ictype == 1 or ictype == 5 or ictype == 6 or ictype == 7:
 
     errL2 = np.array(errL2)
     errCurl = np.array(errCurl)
@@ -744,8 +767,19 @@ if ictype == 1 or ictype == 6 or ictype == 7:
     int0t_errstab = dt*0.5*np.sum(errStab[:-1] + errStab[1:])
     #
     errLinftyL2 = np.max(np.sqrt(errL2))
+
     errL2H1 = sqrt( int0t_errL2 + int0t_errH1 )
     err_tot = errLinftyL2 + sqrt( int0t_errL2 + int0t_errH1 + int0t_errstab)
+    if ictype == 5:
+        errLinf = np.array(errLinf)
+        # for the loop advection
+        errLinftyL2 = sqrt(errL2[-1])
+        errL2H1 = errLinf[-1]
+        normL2 = sqrt(Integrate(Norm(B0)**2, mesh, order = 5))
+        normLinfty = np.max(np.array(Norm(B0)(mips)))
+        print(f"Norm L2 of B = {normL2}")
+        print(f"Norm Linfty of B = {normLinfty}")
+
     print(errLinftyL2, errL2H1, err_tot)
 
     # ---------------------------------------------------------
